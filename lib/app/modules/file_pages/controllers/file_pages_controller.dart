@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 class FilePagesController extends GetxController {
-  late FileManagerController fileManagerController;
+  // late FileManagerController fileManagerController;
   late TextEditingController textEditingController;
   var isSelected = false.obs;
   var selectedItem = <FileSystemEntity>[].obs;
@@ -23,7 +23,7 @@ class FilePagesController extends GetxController {
 
   @override
   void onInit() {
-    fileManagerController = FileManagerController();
+    // fileManagerController = FileManagerController();
     textEditingController = TextEditingController();
     super.onInit();
   }
@@ -31,7 +31,7 @@ class FilePagesController extends GetxController {
   @override
   void onClose() {
     textEditingController.dispose();
-    fileManagerController.dispose();
+    // fileManagerController.dispose();
     super.onClose();
   }
 }

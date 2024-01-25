@@ -61,6 +61,9 @@ class _FilePagesViewState extends State<FilePagesView> {
         await File(file.uri.path).copy(
             '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
       }
+      if (controller.operation.value != Operation.none) {
+        controller.operation.value = Operation.none;
+      }
     }
 
     Future<void> move() async {
@@ -69,6 +72,54 @@ class _FilePagesViewState extends State<FilePagesView> {
             '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
         await file.delete();
       }
+      if (controller.operation.value != Operation.none) {
+        controller.operation.value = Operation.none;
+      }
+    }
+
+    Future<void> rename() async {
+      final file = controller.selectedItem.first;
+      final initialValue = FileManager.basename(file);
+      final textController = TextEditingController();
+      textController.text = initialValue;
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(initialValue),
+              const Text(
+                'Enter new name:',
+                style: TextStyle(fontSize: 15, color: Colors.grey),
+              ),
+              TextFormField(
+                decoration: const InputDecoration(isDense: true),
+                controller: textController,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('cancel'),
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+                onPressed: () {
+                  file.renameSync('${file.parent.path}/${textController.text}');
+                  FocusScope.of(context).unfocus();
+                  Navigator.of(context).pop();
+                  controller.selectedItem.clear();
+                  controller.isSelected.value = false;
+                },
+                child: const Text('rename'))
+          ],
+        ),
+      );
+      textController.dispose();
     }
 
     Future<void> extractZipArchive() async {
@@ -309,18 +360,22 @@ class _FilePagesViewState extends State<FilePagesView> {
                             {
                               controller.isMovingOrCopying.value = true;
                               controller.isSelected.value = false;
+                              controller.operation.value = Operation.copy;
                             }
                           case 'cut':
                             {
                               controller.isMovingOrCopying.value = true;
                               controller.isSelected.value = false;
+                              controller.operation.value = Operation.move;
                             }
                           case 'delete':
                             {
                               delete();
                             }
                           case 'rename':
-                            {}
+                            {
+                              rename();
+                            }
                           case 'extract':
                             {
                               extractZipArchive();
