@@ -1,12 +1,9 @@
 import 'dart:io';
-
-import 'package:file_manager/file_manager.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 class FilePagesController extends GetxController {
   // late FileManagerController fileManagerController;
-  late TextEditingController textEditingController;
+  // late TextEditingController textEditingController;
   var isSelected = false.obs;
   var selectedItem = <FileSystemEntity>[].obs;
   late RxString currentDirectory = 'storage'.obs;
@@ -24,13 +21,13 @@ class FilePagesController extends GetxController {
   @override
   void onInit() {
     // fileManagerController = FileManagerController();
-    textEditingController = TextEditingController();
+    // textEditingController = TextEditingController();
     super.onInit();
   }
 
   @override
   void onClose() {
-    textEditingController.dispose();
+    // textEditingController.dispose();
     // fileManagerController.dispose();
     super.onClose();
   }

@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:file_manager/file_manager.dart';
@@ -7,7 +8,8 @@ import 'package:fuzzywuzzy/fuzzywuzzy.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:open_file_plus/open_file_plus.dart';
-
+import 'package:video_thumbnail/video_thumbnail.dart';
+import 'package:path/path.dart';
 import '../controllers/file_pages_controller.dart';
 
 class FilePagesView extends StatefulWidget {
@@ -22,33 +24,43 @@ class _FilePagesViewState extends State<FilePagesView> {
   Widget build(BuildContext context) {
     final controller = Get.put(FilePagesController());
 
+    final textEditingController = TextEditingController();
+
     final filemanagerController = FileManagerController();
 
     Future<void> createZipArchive() async {
       final entities = controller.selectedItem;
-      final directoryPath = entities[0].parent.path;
-      final zipFile = '$directoryPath/archive.zip';
-      controller.isSelected.value = false;
+      late final String zipFile = '${entities[0].path}.zip';
+
       final encoder = ZipFileEncoder();
       encoder.create(zipFile);
+      log('message');
       for (var entity in entities) {
         if (entity is File) {
-          encoder.addFile(entity);
+          encoder.addFile(
+            entity,
+          );
         } else if (entity is Directory) {
-          encoder.addDirectory(entity);
+          encoder.addDirectory(entity, onProgress: (value) {});
         } else if (entity is ArchiveFile) {
-          encoder.addArchiveFile(entity as ArchiveFile);
+          encoder.addArchiveFile(
+            entity as ArchiveFile,
+          );
         }
       }
       encoder.close();
+      controller.selectedItem.clear();
+      controller.isSelected.value = false;
     }
 
     Future<void> delete() async {
       for (final FileSystemEntity entity in controller.selectedItem) {
         try {
-          entity
-              .delete(recursive: true)
-              .then((value) => controller.isSelected.value = false);
+          if (await entity.exists()) {
+            entity
+                .delete(recursive: true)
+                .then((value) => controller.isSelected.value = false);
+          }
         } catch (e) {
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('failed to delete file')));
@@ -58,97 +70,101 @@ class _FilePagesViewState extends State<FilePagesView> {
 
     Future<void> copy() async {
       for (final FileSystemEntity file in controller.selectedItem) {
-        await File(file.uri.path).copy(
-            '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
-      }
-      if (controller.operation.value != Operation.none) {
-        controller.operation.value = Operation.none;
+        if (await file.exists()) {
+          await File(file.path).copy(
+              '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
+        }
+        if (controller.operation.value != Operation.none) {
+          controller.operation.value = Operation.none;
+        }
       }
     }
 
     Future<void> move() async {
       for (final FileSystemEntity file in controller.selectedItem) {
-        await File(file.uri.path).copy(
-            '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
-        await file.delete();
-      }
-      if (controller.operation.value != Operation.none) {
-        controller.operation.value = Operation.none;
+        if (await file.exists()) {
+          await File(file.path).copy(
+              '${filemanagerController.getCurrentPath}/${FileManager.basename(file)}');
+          await file.delete();
+        }
+        if (controller.operation.value != Operation.none) {
+          controller.operation.value = Operation.none;
+        }
       }
     }
 
     Future<void> rename() async {
-      final file = controller.selectedItem.first;
-      final initialValue = FileManager.basename(file);
-      final textController = TextEditingController();
-      textController.text = initialValue;
-      await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(initialValue),
-              const Text(
-                'Enter new name:',
-                style: TextStyle(fontSize: 15, color: Colors.grey),
-              ),
-              TextFormField(
-                decoration: const InputDecoration(isDense: true),
-                controller: textController,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              child: const Text('cancel'),
-              onPressed: () {
-                FocusScope.of(context).unfocus();
-                Navigator.of(context).pop();
-              },
+      if (controller.selectedItem.isNotEmpty) {
+        var text = 'renamed';
+        final file = controller.selectedItem.first;
+        final initialValue = basename(file.path);
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(initialValue),
+                const Text(
+                  'Enter new name:',
+                  style: TextStyle(fontSize: 15, color: Colors.grey),
+                ),
+                TextFormField(
+                  decoration: InputDecoration(
+                      isDense: true,
+                      errorText: text.isEmpty ? 'name can\'t be empty' : null),
+                  initialValue: initialValue,
+                  validator: (value) {
+                    if (text.isEmpty) return 'name can\'t be empty';
+                    return null;
+                  },
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  onChanged: (value) => text = value,
+                ),
+              ],
             ),
-            TextButton(
+            actions: [
+              TextButton(
+                child: const Text('cancel'),
                 onPressed: () {
-                  file.renameSync('${file.parent.path}/${textController.text}');
                   FocusScope.of(context).unfocus();
                   Navigator.of(context).pop();
-                  controller.selectedItem.clear();
-                  controller.isSelected.value = false;
                 },
-                child: const Text('rename'))
-          ],
-        ),
-      );
-      textController.dispose();
+              ),
+              TextButton(
+                  onPressed: () {
+                    if (text.isNotEmpty) {
+                      file.renameSync('${file.parent.path}/$text');
+                      FocusScope.of(context).unfocus();
+                      Navigator.of(context).pop();
+
+                      controller.isSelected.value = false;
+                    }
+                  },
+                  child: const Text('rename'))
+            ],
+          ),
+        );
+      }
     }
 
     Future<void> extractZipArchive() async {
       final entity = controller.selectedItem[0];
-      final directoryPath = entity.parent.path;
-      final baseName = FileManager.basename(entity, showFileExtension: false);
-      final lastDot = baseName.indexOf('.');
-      final directoryName =
-          lastDot == -1 ? baseName : baseName.substring(0, lastDot);
-      final directory = '$directoryPath/$directoryName';
+      final path = entity.path;
+      final directory = withoutExtension(path);
       controller.isSelected.value = false;
-
-      try {
-        final bytedata = await File(entity.uri.path).readAsBytes();
-        final decode = ZipDecoder();
-        Archive archive = decode.decodeBytes(bytedata);
-        for (final ArchiveFile file in archive) {
-          if (file.isFile) {
-            final data = file.content as List<int>;
-            File(directory)
-              ..createSync(recursive: true)
-              ..writeAsBytesSync(data);
-          } else {
-            Directory(directory).createSync();
-          }
+      final List<int> bytes = File(path).readAsBytesSync();
+      final Archive archive = ZipDecoder().decodeBytes(bytes);
+      for (final file in archive) {
+        final filename = file.name;
+        if (file.isFile) {
+          final data = file.content as List<int>;
+          File('$directory/$filename')
+            ..createSync(recursive: true)
+            ..writeAsBytesSync(data);
+        } else {
+          Directory('$directory/$filename').create(recursive: true);
         }
-      } catch (e) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
       }
     }
 
@@ -191,8 +207,9 @@ class _FilePagesViewState extends State<FilePagesView> {
           if (snapshot.hasData) {
             if (FileManager.isFile(entity)) {
               return Text(
-                DateFormat.yMEd().format(snapshot.data!.modified),
+                DateFormat.yMd().format(snapshot.data!.modified),
                 style: const TextStyle(color: Colors.grey),
+                overflow: TextOverflow.ellipsis,
               );
             }
           } else {
@@ -217,11 +234,60 @@ class _FilePagesViewState extends State<FilePagesView> {
             return Image.asset('assets/google-docs.png');
           }
         } else if (supportedImageExtensions.contains(fileExtension)) {
+          final file = File(entity.path);
+          if (file.existsSync()) {
+            try {
+              return Image.file(
+                file,
+                filterQuality: FilterQuality.low,
+                fit: BoxFit.contain,
+              );
+            } catch (e) {
+              return Image.asset('assets/picture.png');
+            }
+          }
           return Image.asset('assets/picture.png');
         } else if (supportedSoundExtensions.contains(fileExtension)) {
           return Image.asset('assets/music.png');
         } else if (supportedVideoExtensions.contains(fileExtension)) {
-          return Image.asset('assets/video.png');
+          try {
+            final uint8list = VideoThumbnail.thumbnailData(
+              video: entity.uri.path,
+              imageFormat: ImageFormat.JPEG,
+              maxWidth: 128,
+              quality: 25,
+            );
+            return FutureBuilder(
+                future: uint8list,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting ||
+                      snapshot.connectionState == ConnectionState.active) {
+                    return Image.asset('assets/video.png');
+                  } else if (snapshot.hasError) {
+                    return Image.asset('assets/video_error.png');
+                  } else if (snapshot.hasData) {
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Image.memory(
+                          snapshot.data!,
+                          filterQuality: FilterQuality.low,
+                          fit: BoxFit.contain,
+                        ),
+                        Image.asset(
+                          'assets/play_video.png',
+                          height: 20,
+                          color: Colors.white,
+                        )
+                      ],
+                    );
+                  } else {
+                    return Image.asset('assets/video.png');
+                  }
+                });
+          } catch (e) {
+            return Image.asset('assets/video.png');
+          }
         } else if (fileExtension == 'apk') {
           return Image.asset('assets/apk.png');
         } else if (fileExtension == 'zip' ||
@@ -240,7 +306,7 @@ class _FilePagesViewState extends State<FilePagesView> {
         if (controller.isSearching.value) {
           controller.updateSearchData('');
           controller.isSearching.value = false;
-          controller.textEditingController.clear();
+          textEditingController.clear();
           controller.entities.value = controller.tempentities;
         } else if (controller.isSelected.value) {
           controller.isSelected.value = false;
@@ -286,14 +352,14 @@ class _FilePagesViewState extends State<FilePagesView> {
                               onPressed: () {
                                 controller.isSearching.value = true;
                                 controller.updateSearchData('');
-                                controller.textEditingController.clear();
+                                textEditingController.clear();
                               },
                               icon: const Icon(Icons.close_rounded),
                             ),
                           ),
                         ),
                       ),
-                      controller: controller.textEditingController,
+                      controller: textEditingController,
                       onChanged: (value) {
                         controller.updateSearchData(value);
                         searchFile();
@@ -305,7 +371,12 @@ class _FilePagesViewState extends State<FilePagesView> {
             leading: Obx(() => Visibility(
                   visible: controller.isMovingOrCopying.value,
                   child: IconButton(
-                      onPressed: () {},
+                      onPressed: () {
+                        controller.isMovingOrCopying.value = false;
+                        if (controller.selectedItem.isNotEmpty) {
+                          controller.selectedItem.clear();
+                        }
+                      },
                       icon: const Icon(Icons.cancel_outlined)),
                 )),
             centerTitle: true,
@@ -354,7 +425,7 @@ class _FilePagesViewState extends State<FilePagesView> {
                   : const SizedBox()),
               Obx(() => controller.isSelected.value
                   ? PopupMenuButton(
-                      onSelected: (value) {
+                      onSelected: (value) async {
                         switch (value) {
                           case 'copy':
                             {
@@ -370,19 +441,23 @@ class _FilePagesViewState extends State<FilePagesView> {
                             }
                           case 'delete':
                             {
-                              delete();
+                              await delete();
+                              controller.selectedItem.clear();
                             }
                           case 'rename':
                             {
-                              rename();
+                              await rename();
+                              controller.selectedItem.clear();
                             }
                           case 'extract':
                             {
-                              extractZipArchive();
+                              await extractZipArchive();
+                              controller.selectedItem.clear();
                             }
                           case 'compress':
                             {
-                              createZipArchive();
+                              await createZipArchive();
+                              controller.selectedItem.clear();
                             }
                         }
                       },
@@ -453,99 +528,96 @@ class _FilePagesViewState extends State<FilePagesView> {
                     itemBuilder: (context, index) {
                       final FileSystemEntity entity =
                           controller.entities[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: ListTile(
-                          leading: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Obx(
-                              () => controller.isSelected.value
-                                  ? SizedBox(
-                                      width: MediaQuery.of(context).size.width *
-                                          0.2,
-                                      child: Row(
-                                        children: [
-                                          if (controller.isSelected.value)
-                                            controller.selectedItem
-                                                    .contains(entity)
-                                                ? const Icon(
-                                                    Icons.check_box_outlined,
-                                                    color: Colors.blueAccent,
-                                                  )
-                                                : const Icon(Icons
-                                                    .check_box_outline_blank),
-                                          leading(entity: entity),
-                                        ],
-                                      ),
-                                    )
-                                  : leading(entity: entity),
-                            ),
+                      return ListTile(
+                        leading: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          child: Obx(
+                            () => controller.isSelected.value
+                                ? SizedBox(
+                                    width:
+                                        MediaQuery.of(context).size.width * 0.2,
+                                    child: Row(
+                                      children: [
+                                        if (controller.isSelected.value)
+                                          controller.selectedItem
+                                                  .contains(entity)
+                                              ? const Icon(
+                                                  Icons.check_box_outlined,
+                                                  color: Colors.blueAccent,
+                                                )
+                                              : const Icon(Icons
+                                                  .check_box_outline_blank),
+                                        SizedBox(
+                                            width: 40,
+                                            child: leading(entity: entity)),
+                                      ],
+                                    ),
+                                  )
+                                : SizedBox(
+                                    width: 40, child: leading(entity: entity)),
                           ),
-                          title: Text(FileManager.basename(entity,
-                              showFileExtension: true)),
-                          trailing: trailing(entity: entity),
-                          subtitle: subtitle(entity: entity),
-                          onTap: controller.isMovingOrCopying.value
-                              ? () {
-                                  if (entity is Directory) {
-                                    filemanagerController.openDirectory(entity);
-                                  }
+                        ),
+                        title: Text(FileManager.basename(entity,
+                            showFileExtension: true)),
+                        trailing: trailing(entity: entity),
+                        subtitle: subtitle(entity: entity),
+                        onTap: controller.isMovingOrCopying.value
+                            ? () {
+                                if (entity is Directory) {
+                                  filemanagerController.openDirectory(entity);
                                 }
-                              : () async {
-                                  if (controller.isSearching.value) {
-                                    if (FileManager.isDirectory(entity) ||
-                                        controller.searchData.value.isEmpty) {
-                                      controller.isSearching.value = false;
-                                    }
-                                    controller.updateSearchData('');
-                                    controller.textEditingController.clear();
+                              }
+                            : () async {
+                                if (controller.isSearching.value) {
+                                  if (FileManager.isDirectory(entity) ||
+                                      controller.searchData.value.isEmpty) {
+                                    controller.isSearching.value = false;
                                   }
-                                  if (controller.isSelected.value) {
-                                    if (controller.selectedItem
-                                        .contains(entity)) {
-                                      controller.selectedItem.remove(entity);
-                                      if (controller.selectedItem.isEmpty &&
-                                          controller.isSelected.value) {
-                                        controller.isSelected.value = false;
-                                      }
-                                    } else {
-                                      controller.selectedItem.add(entity);
+                                  controller.updateSearchData('');
+                                  textEditingController.clear();
+                                }
+                                if (controller.isSelected.value) {
+                                  if (controller.selectedItem
+                                      .contains(entity)) {
+                                    controller.selectedItem.remove(entity);
+                                    if (controller.selectedItem.isEmpty &&
+                                        controller.isSelected.value) {
+                                      controller.isSelected.value = false;
                                     }
                                   } else {
-                                    if (entity is Directory) {
-                                      try {
-                                        filemanagerController
-                                            .openDirectory(entity);
-                                        controller.currentDirectory.value =
-                                            'storage/${filemanagerController.getCurrentDirectory.path.substring(20)}';
-                                      } catch (e) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(const SnackBar(
-                                                content: Text(
-                                                    'unable to open this directory')));
-                                      }
+                                    controller.selectedItem.add(entity);
+                                  }
+                                } else {
+                                  if (entity is Directory) {
+                                    try {
+                                      filemanagerController
+                                          .openDirectory(entity);
+                                      controller.currentDirectory.value =
+                                          'storage/${filemanagerController.getCurrentDirectory.path.substring(20)}';
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                              content: Text(
+                                                  'unable to open this directory')));
+                                    }
+                                  } else {
+                                    if (FileManager.getFileExtension(entity) ==
+                                        'zip') {
+                                      controller.selectedItem.value = [entity];
+                                      extractZipArchive();
+                                      controller.selectedItem.remove(entity);
                                     } else {
-                                      if (FileManager.getFileExtension(
-                                              entity) ==
-                                          'zip') {
-                                        controller.selectedItem.value = [
-                                          entity
-                                        ];
-                                        extractZipArchive();
-                                        controller.selectedItem.remove(entity);
-                                      } else {
-                                        OpenFile.open(entity.path);
-                                      }
+                                      OpenFile.open(entity.path);
                                     }
                                   }
-                                },
-                          onLongPress: controller.isMovingOrCopying.value
-                              ? null
-                              : () {
-                                  controller.isSelected.value = true;
-                                  controller.selectedItem.add(entity);
-                                },
-                        ),
+                                }
+                              },
+                        onLongPress: controller.isMovingOrCopying.value
+                            ? null
+                            : () {
+                                controller.isSelected.value = true;
+                                controller.selectedItem.add(entity);
+                              },
                       );
                     }),
               );
@@ -555,14 +627,16 @@ class _FilePagesViewState extends State<FilePagesView> {
             visible: controller.isMovingOrCopying.value,
             child: FloatingActionButton(
               shape: const CircleBorder(),
-              onPressed: () {
+              onPressed: () async {
                 controller.isMovingOrCopying.value = false;
                 switch (controller.operation.value) {
                   case Operation.move:
-                    move();
+                    await move();
+                    controller.selectedItem.clear();
                     return;
                   case Operation.copy:
-                    copy();
+                    await copy();
+                    controller.selectedItem.clear();
                     return;
                   case Operation.none:
                     return;
